@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  websdr:
+    build: .
+    ports:
+      - "8080:8080"
+    devices:
+      - "/dev/bus/usb:/dev/bus/usb"
+    environment:
+      SDR_SOURCE: rtl
+      SDR_FREQ: "100800000"
+      SDR_RATE: "2400000"
+      SDR_GAIN: auto
+    restart: unless-stopped
+

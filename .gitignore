@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+.DS_Store
+*.sigmf-data
+*.sigmf-meta
+*.log
