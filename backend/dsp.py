@@ -370,12 +370,28 @@ def _decimate_complex_stateful(iq: np.ndarray, decim: int, state: DemodState = _
     """Like ``_decimate_complex`` but carries each stage's FIR state across
     blocks (keyed by stage ratio + tap count) so the IF channelizer is
     phase-continuous from one capture block to the next -- no per-block click.
+
+    Stage order matters for CPU cost, not just filter count. Each stage's FIR
+    has ``64 * step`` taps and runs over WHATEVER data size is current at that
+    point. Picking the LARGEST available factor first (e.g. a single 8x stage
+    for decim=8) runs the biggest filter (513 taps) over the FULL-RATE block --
+    the most expensive combination possible. At 2.4 Msps/65536-sample blocks
+    this ate ~56% of the real-time budget on modest hardware, and any extra
+    load (waterfall FFT thread, other clients) pushed it over 100%, producing
+    dropped/late audio blocks that sound like glitchy, wrong-sample-rate audio
+    -- exactly the "1x-3x sounds weird, 3x+ sounds fine" symptom (deeper zoom
+    switches to a lower hardware rate with a cheaper decim factor, masking the
+    bug). Preferring the SMALLEST factor first instead shrinks the array after
+    the very first (cheapest, small-tap) stage, so every subsequent stage's
+    bigger filter runs over far fewer samples -- standard multistage
+    decimation practice, and it cuts total multiply-adds roughly in half for
+    decim=8 (three cheap 2x stages instead of one big 8x stage).
     """
     work = np.asarray(iq, dtype=np.complex64)
     remaining = int(decim)
     stage_index = 0
     while remaining > 1:
-        step = next((f for f in (8, 7, 6, 5, 4, 3, 2) if remaining % f == 0), remaining)
+        step = next((f for f in (2, 3, 4, 5, 6, 7, 8) if remaining % f == 0), remaining)
         taps = min(513, 64 * step) | 1
         h = _decim_lowpass(step, taps)
         key = (stage_index, step, taps)
