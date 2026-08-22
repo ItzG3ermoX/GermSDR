@@ -283,6 +283,16 @@ class RtlSdrCaptureSource:
             self._stop.wait(self._retry_delay)
             if self._stop.is_set():
                 return False
+            # Close the previous (failed) handle before opening a new one --
+            # otherwise the stale RtlSdr object still holds the USB device
+            # open and we leak a device handle on every retry, which can
+            # eventually make re-opening fail outright ("device busy").
+            if self._sdr is not None:
+                try:
+                    self._sdr.close()
+                except Exception:
+                    pass
+                self._sdr = None
             self._sdr = RtlSdr()
             if not self._sdr.dev_p:
                 self._sdr.close()
@@ -519,12 +529,26 @@ class RtlSdrCaptureSource:
 
         try:
             while not self._stop.is_set():
-                # Check for config changes
+                # Check for config changes that actually affect the hardware.
+                # Comparing the whole RadioConfig (including mode/demod_bw/
+                # squelch, which are DSP-only and applied downstream in
+                # pipeline.py/dsp.py) would re-push tuner settings and clear
+                # the IQ ring on every unrelated UI tweak (e.g. dragging the
+                # squelch slider), causing a needless audio/waterfall gap.
                 config = self._state.snapshot()
-                if config != last_config:
+                hw_changed = (
+                    config.sample_rate != last_config.sample_rate
+                    or config.center_freq != last_config.center_freq
+                    or config.gain != last_config.gain
+                    or config.ppm != last_config.ppm
+                    or config.rtl_agc != last_config.rtl_agc
+                    or config.bias_tee != last_config.bias_tee
+                    or config.direct_sampling != last_config.direct_sampling
+                )
+                if hw_changed:
                     self._configure()
                     self._ring.clear()
-                    last_config = config
+                last_config = config
 
                 # Read samples synchronously (works with V4 driver)
                 try:
@@ -533,9 +557,14 @@ class RtlSdrCaptureSource:
                     self._recovery_mode = False
                 except Exception as exc:
                     LOGGER.error("read_samples failed: %s", exc)
+                    # The device is down for the duration of this retry loop --
+                    # reflect that in `healthy` so pipeline.status["running"]
+                    # doesn't lie to clients about samples actually flowing.
+                    self._healthy = False
                     # Enter retry loop instead of permanent exit
                     while not self._stop.is_set():
                         if self._try_reinit():
+                            self._healthy = True
                             break
                         # _try_reinit already waited and backed off
                     continue  # Resume capture loop after retry
