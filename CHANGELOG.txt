@@ -1,0 +1,123 @@
+GermSDR - Change Log
+====================
+
+Session 1: 2026-07-19 (Codebase Audit & Audio Pipeline Fixes)
+
+--- AUDIT FINDINGS & FIXES ---
+
+[1] Stale-block guard in pipeline.py
+    Problem: Click-to-tune changed tune_offset but the stale-block guard in
+    _pump() only guarded against sample_rate changes. Old IQ data was
+    demodulated at the wrong frequency offset → audible "blurp" on every click.
+    Fix: Added last_pump_center and last_pump_offset trackers. The stale check
+    now fires on ANY of: sample_rate, center_freq, or tune_offset change.
+
+[2] zoom=1.25x collapsed the waterfall (state.py DIGITAL_ZOOM_MAX)
+    Problem: DIGITAL_ZOOM_MAX was 1.2, meaning zooming past 1.2× triggered
+    a hardware retune from 2.4 MHz → 1.2 MHz, collapsing the visible band.
+    Fix: Raised DIGITAL_ZOOM_MAX from 1.2 → 4.0. Now waterfall stays wide
+    through moderate zooms and only retunes when truly zoomed in.
+    (Also fixed 5 pre-existing tests that expected zoom=4.0 to stay on 2.4M.)
+
+[3] Mode button UI desync on failed tune (fontend/src/main.ts)
+    Problem: setMode() ran synchronously before async tune(). If the server
+    rejected the tune, the button stayed in the new mode while the server was
+    on the old one (~1.5s window before status poll corrected it).
+    Fix: Save oldMode, revert button on catch.
+
+[4] lastCenterFreq stomp in waterfall pan (fontend/src/main.ts)
+    Problem: lastCenterFreq = tunedFreq ran AFTER every tune response,
+    including in-band clicks (no recenter). Overwrote the slice centre for
+    ~40ms → band plan ruler flickered on every click.
+    Fix: Gated behind "if (result.recentered)".
+
+[5] Audio WebSocket reconnection timer stacking (fontend/src/ws-client.ts)
+    Problem: Raw setTimeout on every onclose() → multiple timers could stack
+    during a server flap → multiple parallel WebSocket connections.
+    Fix: Rewrote createWs() with reconnectTimer tracking. Clear stale WS
+    before opening new one. Close() explicitly clears the timer.
+
+[6] V4 auto-gain → deaf receiver (backend/capture.py)
+    Problem: R828D tuner on V4 often rejects rtlsdr_set_tuner_gain_mode(dev, 0)
+    (auto-gain). Left in undefined power-on state → minimum gain → effectively
+    muted.
+    Fix: When auto-gain fails, fall back to manual mode + 30 dB gain.
+
+[7] FFT peak-reduction performance (backend/dsp.py)
+    Problem: Python for-loop iterating 32,768 bins per waterfall frame.
+    Fix: Replaced with np.maximum.at() — C-level vectorised, same logic.
+
+[8] Mute ramp for all offset changes (backend/dsp.py)
+    Problem: Only muted on large (>50kHz) offset jumps. Small nearby clicks
+    produced stale-block audio bursts.
+    Fix: Apply mute ramp on ANY offset change (10ms for big, 5ms for small).
+
+[9] _fm_level initialization (backend/dsp.py)
+    Problem: Initialized to 0.1 but target gain computed as 0.25 / level.
+    0.25/0.1 = 2.5× gain spike every zoom change that fought the mute ramp.
+    Fix: Changed to 0.25 → 0.25/0.25 = 1.0 gain immediately after reset.
+
+[10] Dead code cleanup
+    - _apply_mute_ramp: removed unused ramp_len parameter (backend/dsp.py)
+    - numba import: removed (backend/dsp.py, requirements.txt)
+    - stale .js files: 7 deleted from frontend/src/ (already gitignored)
+    - capture.py.lines: trash file deleted
+
+[11] README-WINDOWS.md formatting: Fixed 7 blank lines in RTL-SDR code block.
+
+
+Session 2: 2026-07-19 (Zoom-dependent Audio Quality Debugging)
+
+--- PROBLEM ---
+User reports audio sounds grainy/weird at low zoom (1.0× - 3.8×, runs at
+2.4 MHz sample rate), but sounds clean at high zoom (4.8×+, runs at
+1.2 MHz or lower sample rates).
+
+--- INVESTIGATION ---
+- DSP chain is IDENTICAL at 2.4 MHz and 1.2 MHz: both channelize to
+  300 kHz IF, apply same pre-demod filter (95 kHz lowpass), FM discriminator,
+  DC block, de-emphasis, audio LPF at 15 kHz, then decimate to 48 kHz.
+
+- The root cause is in the ANALOG/RF domain, not DSP:
+  At 2.4 MHz sample rate, the R828D tuner IF filter defaults to ~2.5 MHz.
+  This wide RF bandwidth lets ~2× the noise power into the 8-bit RTL2832U ADC
+  vs the 1.2 MHz rate. The extra noise compresses the ADC's limited dynamic
+  range (ENOB ~7 bits) via clipping and intermodulation, some of which falls
+  within the 300 kHz IF passband used for WBFM → audible as grainy audio.
+
+--- FIXES APPLIED ---
+
+[1] R828D tuner IF bandwidth clamp (backend/capture.py, NEW)
+    - Added _apply_tuner_bandwidth() method
+    - Sets tuner IF bandwidth to min(sample_rate, 1_500_000) with 600 kHz floor
+    - At 2.4 MHz: 1.5 MHz (was ~2.5 MHz default) → cuts RF noise by ~40%
+    - Placed AFTER center_freq in _configure() because librtlsdr's
+      rtlsdr_set_center_freq internally resets the tuner bandwidth!
+
+[2] WBFM audio 10 kHz bandwidth clamp removed (backend/dsp.py)
+    - Was: reducing audio BW from 15 kHz → 10 kHz when sample_rate > 1.2 MHz
+    - Removed since it's a band-aid on the RF noise issue, not a fix
+    - Audio now always gets full bandwidth user selected
+
+[3] RTL AGC defaults to ON (backend/state.py)
+    - RadioConfig.rtl_agc changed from False → True
+    - RTL2832U digital AGC adjusts ADC reference level dynamically
+    - Protects 8-bit ADC from overload at wide bandwidths without
+      sacrificing weak-signal performance (unlike fixed attenuator)
+
+--- STILL OPEN ---
+- Audio WS keepalive: if the backend pipeline silently dies, the WS stays
+  open and the worklet drains its 2s buffer then fades to silence. Would
+  need a heartbeat mechanism.
+- read_sync blocks capture thread for ~27ms per call on real hardware.
+
+--- TEST RESULTS ---
+- 18/18 tests pass after all changes
+- TypeScript builds clean
+- Vite frontend build: ~622ms
+
+--- RUN COMMANDS (RTL-SDR V4 on Windows) ---
+    $env:SDR_SOURCE="rtl"
+    .\.venv\Scripts\python -m uvicorn backend.server:app --host 127.0.0.1 --port 8081
+
+    Open http://127.0.0.1:8081 in browser.

@@ -3,14 +3,19 @@ export type ColorMapName = 'spectrum' | 'inferno' | 'viridis' | 'mono';
 type Stop = [number, number, number, number];
 
 const MAPS: Record<ColorMapName, Stop[]> = {
+  // Faithful KiwiSDR waterfall palette: deep black/blue noise floor that ramps
+  // through blue -> cyan -> green -> yellow -> red -> white for strong signals.
   spectrum: [
-    [0, 0, 0, 8],
-    [0.16, 20, 58, 160],
-    [0.34, 10, 194, 210],
-    [0.52, 30, 185, 76],
-    [0.72, 240, 210, 45],
-    [0.88, 230, 64, 32],
-    [1, 255, 255, 245],
+    [0.0, 0, 0, 0],
+    [0.10, 0, 0, 48],
+    [0.22, 8, 16, 130],
+    [0.36, 0, 102, 200],
+    [0.50, 0, 196, 196],
+    [0.62, 26, 200, 78],
+    [0.74, 196, 220, 20],
+    [0.85, 240, 150, 16],
+    [0.94, 228, 44, 24],
+    [1.0, 255, 255, 255],
   ],
   inferno: [
     [0, 3, 2, 18],

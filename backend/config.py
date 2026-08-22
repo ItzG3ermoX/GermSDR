@@ -9,14 +9,24 @@ def _env_int(name: str, default: int) -> int:
     value = os.getenv(name)
     if value is None or value == "":
         return default
-    return int(value.replace("_", ""))
+    try:
+        return int(value.replace("_", ""))
+    except (ValueError, TypeError):
+        import warnings as _w
+        _w.warn(f"Invalid SDR_{name}={value!r}, falling back to default {default}")
+        return default
 
 
 def _env_float(name: str, default: float) -> float:
     value = os.getenv(name)
     if value is None or value == "":
         return default
-    return float(value)
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        import warnings as _w
+        _w.warn(f"Invalid SDR_{name}={value!r}, falling back to default {default}")
+        return default
 
 
 @dataclass(frozen=True)
@@ -35,6 +45,22 @@ class Settings:
     port: int = 8080
     frontend_dist: Path = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
+    def __post_init__(self) -> None:
+        positive_fields = {
+            "sample_rate": self.sample_rate,
+            "fft_size": self.fft_size,
+            "block_size": self.block_size,
+            "ring_slots": self.ring_slots,
+            "waterfall_fps": self.waterfall_fps,
+        }
+        for name, value in positive_fields.items():
+            if value <= 0:
+                raise ValueError(f"{name} must be greater than zero")
+        if self.audio_rate != 48_000:
+            raise ValueError("audio_rate must be 48000 Hz")
+        if not 1 <= self.port <= 65_535:
+            raise ValueError("port must be between 1 and 65535")
+
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
@@ -52,4 +78,3 @@ class Settings:
             port=_env_int("SDR_PORT", cls.port),
             frontend_dist=Path(os.getenv("SDR_FRONTEND_DIST", str(cls.frontend_dist))),
         )
-

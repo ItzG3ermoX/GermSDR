@@ -18,18 +18,23 @@
         <div class="readouts">
           <span id="freqReadout">100.800 MHz</span>
           <span id="modeReadout">WBFM</span>
+          <span id="bwReadout">15 kHz</span>
           <span id="fftReadout">32768 FFT</span>
+          <span id="srReadout">2.4 MHz</span>
+          <span id="sigMeter" class="sig-meter"><span class="sig-bar" id="sigBar"></span><span id="sigReadout">-90 dB</span></span>
         </div>
       </header>
 
       <main class="workspace">
         <section class="viewport">
+          <canvas id="bandPlan" class="band-plan" aria-label="Band plan"></canvas>
+          <canvas id="freqStrip" class="freq-strip"></canvas>
           <canvas id="waterfall" aria-label="Live SDR waterfall"></canvas>
-          <div class="spectrum-line"></div>
           <div class="hud">
             <span id="frameReadout">0 fps</span>
             <span id="clientReadout">0 clients</span>
             <span id="dropReadout">0 drops</span>
+            <span id="zoomReadout" style="display:none">1.0x zoom</span>
           </div>
         </section>
 
@@ -54,10 +59,54 @@
           </div>
 
           <label class="field">
-            <span>Gain</span>
+            <span>Bandwidth</span>
+            <div class="slider-row">
+              <input id="bwSlider" type="range" min="1" max="250" step="1" value="15" title="Demodulation bandwidth in kHz. WBFM: 15-180, AM: 1-20, SSB: 0.2-8" />
+              <output id="bwOutput">15 kHz</output>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>SDR Gain</span>
             <div class="slider-row">
               <input id="gainSlider" type="range" min="-1" max="49" step="1" value="-1" />
               <output id="gainOutput">auto</output>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>Squelch</span>
+            <div class="slider-row">
+              <input id="squelchSlider" type="range" min="-160" max="-20" step="1" value="-160" title="Squelch threshold in dBFS. -160 = off. Higher values = stronger signal needed." />
+              <output id="squelchOutput">off</output>
+            </div>
+            <div class="squelch-indicator-row">
+              <span class="squelch-led" id="squelchLed" title="Squelch open/closed">●</span>
+              <span id="sigLevelDisplay" class="sig-level-text">-160 dBFS</span>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>PPM</span>
+            <div class="slider-row">
+              <input id="ppmSlider" type="range" min="-150" max="150" step="1" value="0" title="Frequency correction in parts per million" />
+              <output id="ppmOutput">0</output>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>Zoom</span>
+            <div class="slider-row">
+              <input id="zoomSlider" type="range" min="0" max="600" step="1" value="0" title="Zoom into the tuned signal. Linked to mouse-wheel zoom." />
+              <output id="zoomOutput">1.0x</output>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>Volume</span>
+            <div class="slider-row">
+              <input id="volumeSlider" type="range" min="0" max="2" step="0.05" value="1" />
+              <output id="volumeOutput">100%</output>
             </div>
           </label>
 
@@ -97,6 +146,51 @@
               <output id="ceilingOutput">-25</output>
             </div>
           </label>
+
+          <label class="field snap-toggle">
+            <input id="autoContrast" type="checkbox" checked />
+            <span>Auto contrast (signal detect)</span>
+          </label>
+
+          <label class="field">
+            <span>Snap Step</span>
+            <div class="slider-row">
+              <input id="snapStep" type="number" min="0" step="0.01" value="0.1" title="Snap click/tune to nearest multiple (MHz). 0 = off." />
+              <span class="unit">MHz</span>
+            </div>
+          </label>
+
+          <label class="field snap-toggle">
+            <input id="snapEnabled" type="checkbox" />
+            <span>Snap to grid (FM = 0.1)</span>
+          </label>
+
+          <details class="field sdr-details">
+            <summary class="field-summary">SDR Controls</summary>
+            <div class="sdr-controls-body">
+              <label class="field snap-toggle">
+                <input id="rtlAgcCheck" type="checkbox" />
+                <span>RTL AGC (hardware)</span>
+              </label>
+              <label class="field snap-toggle">
+                <input id="biasTeeCheck" type="checkbox" />
+                <span>Bias-T</span>
+              </label>
+              <label class="field">
+                <span>Direct Sampling</span>
+                <select id="directSamplingSelect">
+                  <option value="0">Off</option>
+                  <option value="1">I-channel</option>
+                  <option value="2">Q-channel</option>
+                </select>
+              </label>
+            </div>
+          </details>
+
+          <div class="field">
+            <span>Waterfall</span>
+            <p class="hint">Click to tune · Drag to move the band (any zoom) · Scroll to zoom</p>
+          </div>
 
           <button id="audioButton" class="primary" type="button">
             <span data-lucide="volume-2"></span>

@@ -9,6 +9,9 @@ node_modules/
 frontend/node_modules/
 frontend/dist/
 dist/
+# Compiled TypeScript output that strays next to the .ts sources. The real
+# runtime worklet lives in frontend/public/ and is intentionally kept.
+frontend/src/*.js
 .DS_Store
 *.sigmf-data
 *.sigmf-meta
